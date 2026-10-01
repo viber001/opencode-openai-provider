@@ -1,7 +1,7 @@
 {
-  "name": "openai-no-tsc",
+  "name": "opencode-openai-provider",
   "version": "4.0.37",
-  "description": "Local @ai-sdk/openai fork whose provider package absorbs compatible-endpoint tool_search_call (tsc) responses internally, so OpenCode never executes them. Supports OpenCode v1 and v2.",
+  "description": "OpenCode-adapted @ai-sdk/openai provider fork. Adapting to OpenCode includes absorbing compatible-endpoint tool_search_call (tsc) responses internally, so OpenCode never executes them. Supports OpenCode v1 and v2.",
   "type": "module",
   "license": "GPL-3.0-only",
   "sideEffects": false,

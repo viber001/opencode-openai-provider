@@ -1,14 +1,18 @@
-# OpenAI Provider Fork with Tool-Search Branching (openai-no-tsc)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-This repository is a variant of the local `@ai-sdk/openai@4.0.37`
-compatibility fork. It keeps the existing pending tool-search, item replay, and
-provider-options fixes, but changes the mixed `tool_search_call + function_call`
-path to branch directly into OpenCode's next canonical continuation.
+# OpenCode OpenAI Provider (`opencode-openai-provider`)
 
-The provider package absorbs compatible-endpoint `tool_search_call` (tsc)
-responses internally, so OpenCode never executes them. The compiled provider is
-installed into this project's `release/` directory and loaded by both OpenCode
-v1 and v2. See `AGENTS.md` for the install/release layout and the bun toolchain.
+This repository is an OpenCode-adapted variant of `@ai-sdk/openai@4.0.37`.
+"Adapted to OpenCode" includes one thing in particular: the provider package
+absorbs compatible-endpoint `tool_search_call` (tsc) responses internally, so
+OpenCode v1 and v2 never receive or execute them. It keeps the existing pending
+tool-search, item replay, and provider-options fixes, but changes the mixed
+`tool_search_call + function_call` path to branch directly into OpenCode's next
+canonical continuation.
+
+The compiled provider is installed into this project's `release/` directory and
+loaded by both OpenCode v1 and v2. See `AGENTS.md` for the install/release
+layout and the bun toolchain.
 
 The fork is loaded as an OpenCode provider package. It is not an OpenCode
 plugin and does not modify OpenCode's global tool registry.
@@ -23,7 +27,7 @@ directory:
   "provider": {
     "headroom-openai-branching": {
       "name": "headroom-openai-branching",
-      "npm": "file:///Users/galaxy/.config/opencode/openai-no-tsc/release/index.js",
+      "npm": "file:///Users/galaxy/.config/opencode/opencode-openai-provider/release/index.js",
       "options": {
         "baseURL": "http://127.0.0.1:8787/v1"
       }
@@ -34,7 +38,7 @@ directory:
 
 Node ESM does not support importing this local directory directly. A directory
 URI can work under Bun but fails in the OpenCode desktop runtime with
-`ERR_UNSUPPORTED_DIR_IMPORT`, so use the explicit `dist/index.js` path.
+`ERR_UNSUPPORTED_DIR_IMPORT`, so use the explicit `release/index.js` path.
 
 OpenCode stores credentials by provider ID. `headroom-openai-branching` therefore
 needs its own credential in `~/.local/share/opencode/auth.json`, even when it
@@ -211,7 +215,7 @@ verify the request body at the proxy boundary and check:
 - whether the proxy rewrites or ignores `store`;
 - whether reasoning follow-up input contains `encrypted_content` without a
   server-side `id` or `item_reference`;
-- whether OpenCode is loading this fork's `dist/index.js` rather than stock
+- whether OpenCode is loading this fork's `release/index.js` rather than stock
   `@ai-sdk/openai`.
 
 The branching variant also writes a real-time JSONL diagnostic log to:
@@ -235,7 +239,7 @@ Set `OPENAI_TOOL_SEARCH_COMPAT_DEBUG_FILE=0` to disable the JSONL file.
 Node.js 22 or newer (or Bun) is required. The project is developed with Bun.
 
 ```bash
-cd ~/.config/opencode/openai-no-tsc
+cd ~/.config/opencode/opencode-openai-provider
 bun install
 bun run typecheck   # tsc --noEmit -p tsconfig.build.json
 bun run test        # tool_search_call compatibility and retry semantics

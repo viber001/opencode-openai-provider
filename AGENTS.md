@@ -1,6 +1,6 @@
-# AGENTS.md — openai-no-tsc
+# AGENTS.md — opencode-openai-provider
 
-本仓库是 `@ai-sdk/openai@4.0.37` 的本地 fork，作为 **OpenCode provider 包** 使用（不是 OpenCode 插件，不修改 OpenCode 全局工具注册表）。
+本仓库是 `@ai-sdk/openai@4.0.37` 的本地 fork，作为 **OpenCode provider 包** 使用（不是 OpenCode 插件，不修改 OpenCode 全局工具注册表）。**“适配 OpenCode”本身就包含处理 `tool_search_call`（tsc）**：兼容端点（Codex 风格）会注入客户端执行的 `tool_search_call`，而 OpenCode 并未注册或请求 `tool_search`，因此由 provider 包内部吸收。
 
 ## 目的
 
@@ -49,7 +49,7 @@
 ## 构建与测试（bun）
 
 ```bash
-cd ~/.config/opencode/openai-no-tsc
+cd ~/.config/opencode/opencode-openai-provider
 bun install
 bun run typecheck   # tsc --noEmit -p tsconfig.build.json
 bun run test        # tool_search_call 兼容与重试语义的 16 个用例
