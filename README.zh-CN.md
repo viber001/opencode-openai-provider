@@ -99,6 +99,12 @@ toolNameMapping?.toProviderToolName(tool.name) ?? tool.name
 
 这一取舍确保 provider 能在向 OpenCode 暴露流之前先消费掉 pending 的 `tool_search_call`。
 
+### 非流式 SSE 回退
+
+由于 `doStream()` 是缓冲式的，每个 Responses 请求都经过非流式 JSON 解析器。兼容中转站有时会对 `stream: false` 请求返回 SSE 响应体（`event: response.in_progress\ndata: {...}`），或者用 `response.failed` / `error` 帧表示失败而非 HTTP 错误状态。stock JSON 解析器会把这种响应体当成单个对象读取，报出笼统的 `Invalid JSON response`，掩盖真正的上游信息。
+
+`src/responses/openai-responses-tolerant-response.ts` 会探测 `text/event-stream`（或形如 `event:` / `data:` 的响应体），并从终止事件 `response.completed` 重建最终响应。遇到 `response.failed` / `error` 帧时，它抛出携带真实上游消息与映射状态码的 `APICallError`，使 `server_is_overloaded` / `service_unavailable_error` 这类过载以可重试错误的形式暴露，而不是 `Invalid JSON response`。
+
 ## 保持上游兼容的部分
 
 公开 provider 仍导出 `createOpenAI`、`openai`、Responses、chat、completion、embedding、image、transcription、speech translation、speech、realtime、files、skills、batch 支持，以及标准 OpenAI provider 工具。
@@ -109,6 +115,7 @@ fork 专属源码改动集中在：
 - `src/responses/openai-responses-language-model.ts`
 - `src/responses/openai-responses-retry.ts`
 - `src/responses/openai-responses-prepare-tools.ts`
+- `src/responses/openai-responses-tolerant-response.ts`
 
 不要宣称本 fork 与 stock `@ai-sdk/openai@4.0.37` 行为完全一致。如前所述，Responses 请求序列化、follow-up 请求次数、跨轮 item 重放、延迟、token 用量与流式语义都可能不同。
 

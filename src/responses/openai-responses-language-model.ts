@@ -17,7 +17,6 @@ import {
 import {
   combineHeaders,
   createEventSourceResponseHandler,
-  createJsonResponseHandler,
   createToolNameMapping,
   generateId,
   isCustomReasoning,
@@ -59,6 +58,7 @@ import {
 } from './convert-openai-responses-usage';
 import { convertToOpenAIResponsesInput } from './convert-to-openai-responses-input';
 import { mapOpenAIResponseFinishReason } from './map-openai-responses-finish-reason';
+import { createTolerantResponsesResponseHandler } from './openai-responses-tolerant-response';
 import {
   getOpenCodeResponseErrorStatusCode,
   OPEN_CODE_RETRY_MAX_RETRIES,
@@ -1085,7 +1085,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
             headers: combineHeaders(this.config.headers?.(), options.headers),
             body: requestBody,
             failedResponseHandler: openaiFailedResponseHandler,
-            successfulResponseHandler: createJsonResponseHandler(
+            successfulResponseHandler: createTolerantResponsesResponseHandler(
               openaiResponsesResponseSchema,
             ),
             abortSignal: options.abortSignal,

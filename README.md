@@ -175,6 +175,24 @@ Consequences include:
 This tradeoff ensures the provider can consume a pending `tool_search_call`
 before exposing a stream to OpenCode.
 
+### Non-Streaming SSE Fallback
+
+Because `doStream()` is buffered, every Responses request goes through the
+non-streaming JSON parser. Compatibility relays sometimes answer a
+`stream: false` request with an SSE body (`event: response.in_progress\ndata:
+{...}`), or fail the stream with a `response.failed` / `error` frame instead of
+an HTTP error status. The stock JSON parser reads such a body as a single
+object and reports the opaque `Invalid JSON response`, hiding the upstream
+message.
+
+`src/responses/openai-responses-tolerant-response.ts` sniffs
+`text/event-stream` (or an `event:` / `data:` body) and reconstructs the final
+response from the terminal `response.completed` event. On a `response.failed` /
+`error` frame it throws an `APICallError` carrying the real upstream message and
+a mapped status code, so overloads such as `server_is_overloaded` /
+`service_unavailable_error` surface as retryable errors instead of
+`Invalid JSON response`.
+
 ## What Remains Upstream-Compatible
 
 The public provider still exports `createOpenAI`, `openai`, Responses, chat,
@@ -187,6 +205,7 @@ The fork-specific source changes are concentrated in:
 - `src/responses/openai-responses-language-model.ts`
 - `src/responses/openai-responses-retry.ts`
 - `src/responses/openai-responses-prepare-tools.ts`
+- `src/responses/openai-responses-tolerant-response.ts`
 
 Do not describe the fork as fully behavior-identical to stock
 `@ai-sdk/openai@4.0.37`. Responses request serialization, follow-up request

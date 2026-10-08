@@ -39,7 +39,7 @@
     "clean": "rm -rf dist release",
     "build": "bun run clean && bun build ./src/index.ts ./src/internal/index.ts --outdir dist --target node --format esm --external @ai-sdk/provider --external @ai-sdk/provider-utils --external zod && tsc -p tsconfig.build.json --emitDeclarationOnly --declarationMap false --sourceMap false --outDir dist",
     "typecheck": "tsc --noEmit -p tsconfig.build.json",
-    "test": "bun run test/openai-responses-tool-search-retry.test.ts",
+    "test": "bun run test/openai-responses-tool-search-retry.test.ts && bun run test/openai-responses-sse-response.test.ts",
     "release": "bun run build && rm -rf release && mkdir -p release && cp -R dist/. release/ && cp package.json release/",
     "verify": "bun run typecheck && bun run test && bun run release"
   }
