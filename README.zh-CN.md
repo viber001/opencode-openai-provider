@@ -89,7 +89,9 @@ toolNameMapping?.toProviderToolName(tool.name) ?? tool.name
 
 ### 缓冲式 Responses 流
 
-`doStream()` 目前调用 `doGenerate()`，再把完成的结果转换为缓冲的 AI SDK 流。因此本 fork 的 Responses 请求不走上游原生 SSE 路径。
+`doStream()` 调用 `doGenerate()`，再把完成的结果转换为缓冲的 AI SDK 流。因此 OpenCode 永远看不到本 fork 的增量模型输出。
+
+在网络上，`doGenerate()` 以 `stream: true` 发起请求并消费上游 SSE 流，在运行 `tool_search_call` 逻辑之前，从终止事件 `response.completed` 组装出最终响应。这既保证能在向 OpenCode 暴露任何内容之前先消费掉 pending 的 `tool_search_call`，也避免了某些中转站对长时间非流式请求返回非终态 keepalive 占位响应体的问题（见下文）。
 
 后果包括：
 
@@ -97,13 +99,11 @@ toolNameMapping?.toProviderToolName(tool.name) ?? tool.name
 - time-to-first-output 包含完整生成以及所有隐藏的 `tool_search` follow-up 轮次；
 - chunk 边界与取消行为与 stock `@ai-sdk/openai` 的 Responses 流不同。
 
-这一取舍确保 provider 能在向 OpenCode 暴露流之前先消费掉 pending 的 `tool_search_call`。
-
 ### 非流式 SSE 回退
 
-由于 `doStream()` 是缓冲式的，每个 Responses 请求都经过非流式 JSON 解析器。兼容中转站有时会对 `stream: false` 请求返回 SSE 响应体（`event: response.in_progress\ndata: {...}`），或者用 `response.failed` / `error` 帧表示失败而非 HTTP 错误状态。stock JSON 解析器会把这种响应体当成单个对象读取，报出笼统的 `Invalid JSON response`，掩盖真正的上游信息。
+由于 `doStream()` 是缓冲式的，OpenCode 端的流并非上游流。兼容中转站仍可能返回 SSE 响应体（`event: response.in_progress\ndata: {...}`），或者用 `response.failed` / `error` 帧表示失败而非 HTTP 错误状态；另有一些中转站会对长时间请求返回纯 JSON 的非终态占位响应体（`{"id":"…_keepalive","status":"in_progress","output":[]}`）。stock JSON 解析器会把这种响应体当成单个对象读取，报出笼统的 `Invalid JSON response`，掩盖真正的上游信息。
 
-`src/responses/openai-responses-tolerant-response.ts` 会探测 `text/event-stream`（或形如 `event:` / `data:` 的响应体），并从终止事件 `response.completed` 重建最终响应。遇到 `response.failed` / `error` 帧时，它抛出携带真实上游消息与映射状态码的 `APICallError`，使 `server_is_overloaded` / `service_unavailable_error` 这类过载以可重试错误的形式暴露，而不是 `Invalid JSON response`。
+`src/responses/openai-responses-tolerant-response.ts` 会探测 `text/event-stream`（或形如 `event:` / `data:` 的响应体），从终止事件 `response.completed` 重建响应，并把非终态的 `in_progress` / `keepalive` 响应体视为可重试的 pending 状态。遇到 `response.failed` / `error` 帧时，它抛出携带真实上游消息与映射状态码的 `APICallError`，使 `server_is_overloaded` / `service_unavailable_error` 这类过载以可重试错误的形式暴露，而不是 `Invalid JSON response`。
 
 ## 保持上游兼容的部分
 

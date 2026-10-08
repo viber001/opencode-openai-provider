@@ -160,9 +160,16 @@ limited to `tool_search`.
 
 ### Buffered Responses Streaming
 
-`doStream()` currently calls `doGenerate()` and converts the completed result
-into a buffered AI SDK stream. Responses requests therefore do not use the
-upstream native SSE path in this fork.
+`doStream()` calls `doGenerate()` and converts the completed result into a
+buffered AI SDK stream. OpenCode therefore never sees incremental model output
+from this fork.
+
+On the wire, `doGenerate()` posts `stream: true` and consumes the upstream SSE
+stream, assembling the finished response from the terminal `response.completed`
+event before running the `tool_search_call` logic. This is what lets a pending
+`tool_search_call` be consumed before anything is exposed to OpenCode, and it
+avoids relays that answer a long non-streaming request with a non-terminal
+keepalive placeholder (see below).
 
 Consequences include:
 
@@ -172,26 +179,24 @@ Consequences include:
 - chunk boundaries and cancellation behavior differ from stock
   `@ai-sdk/openai` Responses streaming.
 
-This tradeoff ensures the provider can consume a pending `tool_search_call`
-before exposing a stream to OpenCode.
-
 ### Non-Streaming SSE Fallback
 
-Because `doStream()` is buffered, every Responses request goes through the
-non-streaming JSON parser. Compatibility relays sometimes answer a
-`stream: false` request with an SSE body (`event: response.in_progress\ndata:
-{...}`), or fail the stream with a `response.failed` / `error` frame instead of
-an HTTP error status. The stock JSON parser reads such a body as a single
-object and reports the opaque `Invalid JSON response`, hiding the upstream
-message.
+Because `doStream()` is buffered, OpenCode's stream is not the upstream stream.
+Compatibility relays can still answer with an SSE body (`event:
+response.in_progress\ndata: {...}`) or fail with a `response.failed` / `error`
+frame instead of an HTTP error status, and some return a plain-JSON non-terminal
+placeholder (`{"id":"…_keepalive","status":"in_progress","output":[]}`) for a
+long request. The stock JSON parser reads such bodies as one object and reports
+the opaque `Invalid JSON response`, hiding the upstream message.
 
 `src/responses/openai-responses-tolerant-response.ts` sniffs
-`text/event-stream` (or an `event:` / `data:` body) and reconstructs the final
-response from the terminal `response.completed` event. On a `response.failed` /
-`error` frame it throws an `APICallError` carrying the real upstream message and
-a mapped status code, so overloads such as `server_is_overloaded` /
-`service_unavailable_error` surface as retryable errors instead of
-`Invalid JSON response`.
+`text/event-stream` (or an `event:` / `data:` body), reconstructs the response
+from the terminal `response.completed` event, and treats a non-terminal
+`in_progress` / `keepalive` body as a retryable pending state. On a
+`response.failed` / `error` frame it throws an `APICallError` carrying the real
+upstream message and a mapped status code, so overloads such as
+`server_is_overloaded` / `service_unavailable_error` surface as retryable errors
+instead of `Invalid JSON response`.
 
 ## What Remains Upstream-Compatible
 

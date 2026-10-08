@@ -82,6 +82,34 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function parseJsonMaybe(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+// Some relays answer a long non-streaming request with a non-terminal
+// placeholder (for example `{"id":"resp_photonmark_keepalive",
+// "status":"in_progress","output":[]}`) instead of holding the connection until
+// the generation finishes. Such a body is valid JSON but is not a final
+// response, so schema validation would otherwise reject it as
+// `Invalid JSON response`.
+function isNonTerminalResponse(value: unknown): boolean {
+  const record = asRecord(value);
+  if (record == null) {
+    return false;
+  }
+
+  const status = record.status;
+  if (typeof status === 'string' && (status === 'in_progress' || status === 'queued')) {
+    return true;
+  }
+
+  return typeof record.id === 'string' && /keepalive/i.test(record.id);
+}
+
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -276,6 +304,20 @@ export function createTolerantResponsesResponseHandler<T>(
           data: { events },
         });
       }
+    }
+
+    const jsonBody = parseJsonMaybe(bodyText);
+    if (isNonTerminalResponse(jsonBody)) {
+      throw new APICallError({
+        message:
+          'OpenAI Responses returned a non-terminal (in_progress) response before completion',
+        url,
+        requestBodyValues,
+        statusCode: 503,
+        responseHeaders,
+        responseBody: bodyText,
+        data: { response: jsonBody },
+      });
     }
 
     return validateJsonText({

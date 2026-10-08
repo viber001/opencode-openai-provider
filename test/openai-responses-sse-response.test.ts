@@ -65,11 +65,13 @@ async function runScenario({
   steps: Array<(response: ServerResponse, index: number) => void>;
 }) {
   let stepCount = 0;
+  const bodies: Array<Record<string, unknown>> = [];
   const server = createServer(async (request, response) => {
     let rawBody = '';
     for await (const chunk of request) {
       rawBody += chunk;
     }
+    bodies.push(JSON.parse(rawBody) as Record<string, unknown>);
     const index = stepCount;
     stepCount += 1;
     const step = steps[index];
@@ -93,6 +95,7 @@ async function runScenario({
   const model = provider.responses('gpt-5.6-luna');
 
   return {
+    bodies,
     call: () =>
       model.doGenerate({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }],
@@ -207,6 +210,68 @@ test('SSE response.failed surfaces the real upstream message as retryable', asyn
     await assert.rejects(scenario.call(), (error: unknown) => {
       assert(APICallError.isInstance(error));
       assert.match((error as APICallError).message, /server_is_overloaded/);
+      assert.equal((error as APICallError).statusCode, 503);
+      assert.equal(isOpenCodeRetryableError(error), true);
+      return true;
+    });
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('requests are sent with stream: true on the wire', async () => {
+  const scenario = await runScenario({
+    steps: [response => sendJson(response, 200, responsePayload([successfulMessage()]))],
+  });
+  try {
+    await scenario.call();
+    assert.equal(scenario.bodies[0]?.stream, true);
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('SSE stream that never completes is retryable (not "Invalid JSON response")', async () => {
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', { type: 'response.created', response: { id: 'resp_x' } }),
+          sseFrame('response.in_progress', { type: 'response.in_progress', response: { id: 'resp_x' } }),
+        ]),
+    ],
+  });
+  try {
+    await assert.rejects(scenario.call(), (error: unknown) => {
+      assert(APICallError.isInstance(error));
+      assert.doesNotMatch((error as APICallError).message, /Invalid JSON response/);
+      assert.equal((error as APICallError).statusCode, 503);
+      assert.equal(isOpenCodeRetryableError(error), true);
+      return true;
+    });
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('JSON keepalive placeholder is retryable (not "Invalid JSON response")', async () => {
+  const keepalive = {
+    id: 'resp_photonmark_keepalive',
+    object: 'response',
+    created_at: 0,
+    status: 'in_progress',
+    output: [],
+    error: null,
+    usage: null,
+  };
+  const scenario = await runScenario({
+    steps: [response => sendJson(response, 200, keepalive)],
+  });
+  try {
+    await assert.rejects(scenario.call(), (error: unknown) => {
+      assert(APICallError.isInstance(error));
+      assert.doesNotMatch((error as APICallError).message, /Invalid JSON response/);
+      assert.match((error as APICallError).message, /in_progress|non-terminal/);
       assert.equal((error as APICallError).statusCode, 503);
       assert.equal(isOpenCodeRetryableError(error), true);
       return true;

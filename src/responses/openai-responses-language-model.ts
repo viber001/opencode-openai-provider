@@ -1083,7 +1083,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
           const result = await postJsonToApi({
             url,
             headers: combineHeaders(this.config.headers?.(), options.headers),
-            body: requestBody,
+            body: { ...requestBody, stream: true },
             failedResponseHandler: openaiFailedResponseHandler,
             successfulResponseHandler: createTolerantResponsesResponseHandler(
               openaiResponsesResponseSchema,

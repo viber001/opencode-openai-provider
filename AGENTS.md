@@ -52,7 +52,7 @@
 cd ~/.config/opencode/opencode-openai-provider
 bun install
 bun run typecheck   # tsc --noEmit -p tsconfig.build.json
-bun run test        # tool_search_call 兼容与重试语义 + 非流式 SSE 容错（completed/failed/error 帧）的用例
+bun run test        # tool_search_call 兼容与重试语义 + SSE 组装/非终态 keepalive/失败帧 的用例
 bun run release     # typecheck 通过后构建并更新安装目录 release/
 # 或一条命令：bun run verify
 ```
