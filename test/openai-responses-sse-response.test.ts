@@ -281,6 +281,47 @@ test('JSON keepalive placeholder is retryable (not "Invalid JSON response")', as
   }
 });
 
+test('completed response with empty output array is retryable (not a silent stop)', async () => {
+  const scenario = await runScenario({
+    steps: [response => sendJson(response, 200, responsePayload([]))],
+  });
+  try {
+    await assert.rejects(scenario.call(), (error: unknown) => {
+      assert(APICallError.isInstance(error));
+      assert.match((error as APICallError).message, /empty output/);
+      assert.equal((error as APICallError).statusCode, 503);
+      assert.equal(isOpenCodeRetryableError(error), true);
+      return true;
+    });
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('SSE completed response with empty output array is retryable', async () => {
+  const completed = responsePayload([]);
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', { type: 'response.created', response: { id: 'resp_x' } }),
+          sseFrame('response.completed', { type: 'response.completed', response: completed }),
+        ]),
+    ],
+  });
+  try {
+    await assert.rejects(scenario.call(), (error: unknown) => {
+      assert(APICallError.isInstance(error));
+      assert.match((error as APICallError).message, /empty output/);
+      assert.equal((error as APICallError).statusCode, 503);
+      assert.equal(isOpenCodeRetryableError(error), true);
+      return true;
+    });
+  } finally {
+    await scenario.close();
+  }
+});
+
 test('SSE error frame (service_unavailable_error) is retryable', async () => {
   const scenario = await runScenario({
     steps: [

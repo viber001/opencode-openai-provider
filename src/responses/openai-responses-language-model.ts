@@ -1125,6 +1125,20 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
             });
           }
 
+          if (response.output.length === 0) {
+            throw new APICallError({
+              message:
+                'Responses API returned a completed response with an empty output array',
+              url,
+              requestBodyValues: requestBody,
+              statusCode: 503,
+              responseHeaders,
+              responseBody: rawResponse as string,
+              data: { response },
+              isRetryable: true,
+            });
+          }
+
           const responseWithOutput = response as typeof response & {
             output: NonNullable<typeof response.output>;
           };
