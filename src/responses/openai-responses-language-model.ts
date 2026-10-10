@@ -1103,7 +1103,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
               requestBodyValues: requestBody,
               statusCode: getOpenCodeResponseErrorStatusCode(response.error),
               responseHeaders,
-              responseBody: rawResponse as string,
+              responseBody: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse),
               data: { error: response.error },
               isRetryable: false,
             });
@@ -1119,7 +1119,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
               requestBodyValues: requestBody,
               statusCode: 500,
               responseHeaders,
-              responseBody: rawResponse as string,
+              responseBody: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse),
               data: { response },
               isRetryable: false,
             });
@@ -1133,7 +1133,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
               requestBodyValues: requestBody,
               statusCode: 503,
               responseHeaders,
-              responseBody: rawResponse as string,
+              responseBody: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse),
               data: { response },
               isRetryable: true,
             });
@@ -1229,7 +1229,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
           requestBodyValues: requestBody,
           statusCode: 500,
           responseHeaders,
-          responseBody: rawResponse as string,
+          responseBody: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse),
           isRetryable: false,
         });
       }
@@ -1269,7 +1269,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
         requestBodyValues: requestBody,
         statusCode: 500,
         responseHeaders,
-        responseBody: rawResponse as string,
+        responseBody: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse),
         isRetryable: false,
       });
     }
