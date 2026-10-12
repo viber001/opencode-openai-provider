@@ -207,6 +207,12 @@ export function reconstructResponseFromSse(events: SseEvent[]): {
   let completedResponse: unknown;
   let latestSnapshot: unknown;
   let sawEvents = false;
+  // Some relays (for example photonmark) stream the response output through
+  // `response.output_item.added` / `response.output_item.done` frames but leave
+  // `output: []` in the terminal `response.completed` snapshot. Collect the
+  // streamed items so the reconstruction does not silently lose them.
+  const streamedItems = new Map<number, unknown>();
+  const streamedIndexOrder: number[] = [];
 
   for (const event of events) {
     const trimmed = event.data.trim();
@@ -232,6 +238,29 @@ export function reconstructResponseFromSse(events: SseEvent[]): {
       return { error, sawEvents };
     }
 
+    if (
+      frame.type === 'response.output_item.added' ||
+      frame.type === 'response.output_item.done'
+    ) {
+      const item = frame.item;
+      if (asRecord(item) != null) {
+        const rawIndex = frame.output_index;
+        const index =
+          typeof rawIndex === 'number' ? rawIndex : streamedIndexOrder.length;
+        if (!streamedItems.has(index)) {
+          streamedIndexOrder.push(index);
+        }
+        // `done` carries the finalized item; prefer it over `added`.
+        if (
+          frame.type === 'response.output_item.done' ||
+          !streamedItems.has(index)
+        ) {
+          streamedItems.set(index, item);
+        }
+      }
+      continue;
+    }
+
     const snapshot = asRecord(frame.response);
     if (snapshot == null) {
       continue;
@@ -246,8 +275,25 @@ export function reconstructResponseFromSse(events: SseEvent[]): {
     }
   }
 
+  let chosen = completedResponse ?? latestSnapshot;
+  const chosenRecord = asRecord(chosen);
+  const chosenHasOutput =
+    chosenRecord != null &&
+    Array.isArray(chosenRecord.output) &&
+    chosenRecord.output.length > 0;
+
+  // When the terminal snapshot carries an empty/missing `output` but the relay
+  // streamed the items separately, rebuild the output array from those items.
+  if (!chosenHasOutput && chosenRecord != null && streamedItems.size > 0) {
+    const output = streamedIndexOrder
+      .slice()
+      .sort((a, b) => a - b)
+      .map(index => streamedItems.get(index));
+    chosen = { ...chosenRecord, output };
+  }
+
   return {
-    response: completedResponse ?? latestSnapshot,
+    response: chosen,
     sawEvents,
   };
 }

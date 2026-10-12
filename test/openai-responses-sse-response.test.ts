@@ -154,6 +154,109 @@ test('reconstructResponseFromSse surfaces response.failed as error', () => {
   assert.match(result.error?.message ?? '', /server_is_overloaded/);
 });
 
+test('reconstructResponseFromSse rebuilds output from streamed output_item frames when the terminal snapshot is empty', () => {
+  const reasoning = {
+    type: 'reasoning',
+    id: 'rs_1',
+    summary: [],
+    encrypted_content: 'enc',
+  };
+  const message = {
+    type: 'message',
+    id: 'msg_1',
+    role: 'assistant',
+    status: 'completed',
+    phase: 'commentary',
+    content: [{ type: 'output_text', text: 'hi', annotations: [] }],
+  };
+  const call = {
+    type: 'function_call',
+    id: 'fc_1',
+    call_id: 'call_1',
+    name: 'bash',
+    arguments: '{}',
+  };
+  const events = parseSseEvents(
+    sseFrame('response.created', { type: 'response.created', response: { id: 'resp_x', output: [] } }) +
+      sseFrame('response.output_item.added', {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: { type: 'reasoning', id: 'rs_1' },
+      }) +
+      sseFrame('response.output_item.done', {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: reasoning,
+      }) +
+      sseFrame('response.output_item.done', {
+        type: 'response.output_item.done',
+        output_index: 1,
+        item: message,
+      }) +
+      sseFrame('response.output_item.done', {
+        type: 'response.output_item.done',
+        output_index: 2,
+        item: call,
+      }) +
+      sseFrame('response.completed', {
+        type: 'response.completed',
+        response: { id: 'resp_x', status: 'completed', output: [] },
+      }),
+  );
+  const result = reconstructResponseFromSse(events);
+  assert.equal(result.error, undefined);
+  assert.deepEqual((result.response as { output?: unknown[] })?.output, [
+    reasoning,
+    message,
+    call,
+  ]);
+});
+
+test('reconstructResponseFromSse prefers a populated terminal output over streamed items', () => {
+  const terminalItem = successfulMessage();
+  const streamed = { type: 'message', id: 'msg_other', role: 'assistant', content: [] };
+  const completed = responsePayload([terminalItem]);
+  const events = parseSseEvents(
+    sseFrame('response.output_item.done', {
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: streamed,
+    }) +
+      sseFrame('response.completed', { type: 'response.completed', response: completed }),
+  );
+  const result = reconstructResponseFromSse(events);
+  assert.deepEqual((result.response as { output?: unknown[] })?.output, [terminalItem]);
+});
+
+test('streamed output_item frames survive an empty terminal output (no silent empty retry)', async () => {
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_x', output: [] },
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: successfulMessage(),
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const result = await scenario.call();
+    assert(result.content.some(part => part.type === 'text' && part.text === 'OK'));
+  } finally {
+    await scenario.close();
+  }
+});
+
 test('plain JSON response still works (fast path)', async () => {
   const scenario = await runScenario({
     steps: [response => sendJson(response, 200, responsePayload([successfulMessage()]))],
