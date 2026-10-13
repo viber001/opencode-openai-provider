@@ -318,9 +318,20 @@ function toolSearchOutput(
 function getReasoningSummaryParts(
   part: Extract<OpenAIResponsesOutputItem, { type: 'reasoning' }>,
 ) {
-  return part.summary.length === 0
-    ? [{ type: 'summary_text' as const, text: '' }]
-    : part.summary;
+  const summary = part.summary ?? [];
+  if (summary.length > 0) {
+    return summary;
+  }
+
+  const content = part.content ?? [];
+  if (content.length > 0) {
+    return content.map(part => ({
+      type: 'summary_text' as const,
+      text: part.text,
+    }));
+  }
+
+  return [{ type: 'summary_text' as const, text: '' }];
 }
 
 function getReasoningProviderOptions(
@@ -3075,6 +3086,45 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
                   // because we need to have a final summary part with the encrypted content
                   activeReasoningPart.summaryParts[value.summary_index] =
                     'can-conclude';
+                }
+              }
+            } else if (value.type === 'response.reasoning_text.delta') {
+              const itemId = resolveOutputItemId({
+                itemId: value.item_id,
+                outputIndex: value.output_index,
+              });
+              controller.enqueue({
+                type: 'reasoning-delta',
+                id: `${itemId}:0`,
+                delta: value.delta,
+                providerMetadata: {
+                  [providerOptionsName]: {
+                    itemId,
+                  } satisfies ResponsesReasoningProviderMetadata,
+                },
+              });
+            } else if (value.type === 'response.reasoning_text.done') {
+              const itemId = resolveOutputItemId({
+                itemId: value.item_id,
+                outputIndex: value.output_index,
+              });
+              const activeReasoningPart = activeReasoning[itemId];
+
+              if (activeReasoningPart != null) {
+                if (store) {
+                  controller.enqueue({
+                    type: 'reasoning-end',
+                    id: `${itemId}:0`,
+                    providerMetadata: {
+                      [providerOptionsName]: {
+                        itemId,
+                      } satisfies ResponsesReasoningProviderMetadata,
+                    },
+                  });
+
+                  activeReasoningPart.summaryParts[0] = 'concluded';
+                } else {
+                  activeReasoningPart.summaryParts[0] = 'can-conclude';
                 }
               }
             } else if (isResponseFinishedChunk(value)) {

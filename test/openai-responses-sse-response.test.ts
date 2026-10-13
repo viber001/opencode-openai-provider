@@ -94,12 +94,17 @@ async function runScenario({
   });
   const model = provider.responses('gpt-5.6-luna');
 
+  const streamRequest = {
+    prompt: [{ role: 'user', content: [{ type: 'text' as const, text: 'test' }] }],
+  };
+
   return {
     bodies,
     call: () =>
       model.doGenerate({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }],
       }),
+    stream: () => model.doStream(streamRequest),
     async close() {
       server.close();
       await once(server, 'close');
@@ -252,6 +257,132 @@ test('streamed output_item frames survive an empty terminal output (no silent em
   try {
     const result = await scenario.call();
     assert(result.content.some(part => part.type === 'text' && part.text === 'OK'));
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('reasoning_text deltas surface as reasoning stream parts (DeepSeek)', async () => {
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_x', output: [] },
+          }),
+          sseFrame('response.output_item.added', {
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+              type: 'reasoning',
+              id: 'rs_1',
+              status: 'in_progress',
+              summary: [],
+              encrypted_content: 'enc-0',
+            },
+          }),
+          sseFrame('response.content_part.added', {
+            type: 'response.content_part.added',
+            output_index: 0,
+            item_id: 'rs_1',
+            content_index: 0,
+            part: { type: 'reasoning_text' },
+          }),
+          sseFrame('response.reasoning_text.delta', {
+            type: 'response.reasoning_text.delta',
+            output_index: 0,
+            item_id: 'rs_1',
+            content_index: 0,
+            delta: 'We',
+          }),
+          sseFrame('response.reasoning_text.delta', {
+            type: 'response.reasoning_text.delta',
+            output_index: 0,
+            item_id: 'rs_1',
+            content_index: 0,
+            delta: ' need answer.',
+          }),
+          sseFrame('response.reasoning_text.done', {
+            type: 'response.reasoning_text.done',
+            output_index: 0,
+            item_id: 'rs_1',
+            content_index: 0,
+            text: 'We need answer.',
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              type: 'reasoning',
+              id: 'rs_1',
+              status: 'completed',
+              content: [{ type: 'reasoning_text', text: 'We need answer.' }],
+              summary: [],
+              encrypted_content: 'enc-0',
+            },
+          }),
+          sseFrame('response.output_item.added', {
+            type: 'response.output_item.added',
+            output_index: 1,
+            item: { type: 'message', id: 'msg_1' },
+          }),
+          sseFrame('response.output_text.delta', {
+            type: 'response.output_text.delta',
+            item_id: 'msg_1',
+            output_index: 1,
+            content_index: 0,
+            delta: 'OK',
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 1,
+            item: successfulMessage(),
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([
+              {
+                type: 'reasoning',
+                id: 'rs_1',
+                status: 'completed',
+                content: [{ type: 'reasoning_text', text: 'We need answer.' }],
+                summary: [],
+                encrypted_content: 'enc-0',
+              },
+              successfulMessage(),
+            ]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const { stream } = await scenario.stream();
+    const parts: Array<Record<string, unknown>> = [];
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value as Record<string, unknown>);
+    }
+
+    const reasoningDeltas = parts.filter(part => part.type === 'reasoning-delta');
+    assert.equal(
+      reasoningDeltas.map(part => part.delta).join(''),
+      'We need answer.',
+    );
+    assert(reasoningDeltas.length > 0, 'reasoning deltas are emitted');
+    assert(
+      reasoningDeltas.every(part => part.id === reasoningDeltas[0]?.id),
+      'reasoning deltas share the reasoning part id',
+    );
+    const reasoningStart = parts.find(part => part.type === 'reasoning-start');
+    const reasoningEnd = parts.find(part => part.type === 'reasoning-end');
+    assert(reasoningStart != null, 'reasoning-start is emitted');
+    assert(reasoningEnd != null, 'reasoning-end is emitted');
+    assert.equal(reasoningStart?.id, reasoningDeltas[0]?.id);
+    assert.equal(reasoningEnd?.id, reasoningDeltas[0]?.id);
+    assert(parts.some(part => part.type === 'text-delta' && part.delta === 'OK'));
   } finally {
     await scenario.close();
   }

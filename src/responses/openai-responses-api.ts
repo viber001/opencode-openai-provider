@@ -821,6 +821,22 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
             type: z.literal('reasoning'),
             id: z.string(),
             encrypted_content: z.string().nullish(),
+            content: z
+              .array(
+                z.object({
+                  type: z.literal('reasoning_text'),
+                  text: z.string(),
+                }),
+              )
+              .nullish(),
+            summary: z
+              .array(
+                z.object({
+                  type: z.literal('summary_text'),
+                  text: z.string(),
+                }),
+              )
+              .nullish(),
           }),
           z.object({
             type: z.literal('function_call'),
@@ -969,6 +985,22 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
             type: z.literal('reasoning'),
             id: z.string(),
             encrypted_content: z.string().nullish(),
+            content: z
+              .array(
+                z.object({
+                  type: z.literal('reasoning_text'),
+                  text: z.string(),
+                }),
+              )
+              .nullish(),
+            summary: z
+              .array(
+                z.object({
+                  type: z.literal('summary_text'),
+                  text: z.string(),
+                }),
+              )
+              .nullish(),
           }),
           z.object({
             type: z.literal('function_call'),
@@ -1276,6 +1308,20 @@ export const openaiResponsesChunkSchema = lazySchema(() =>
         delta: z.string(),
       }),
       z.object({
+        type: z.literal('response.reasoning_text.delta'),
+        item_id: z.string(),
+        output_index: z.number().nullish(),
+        content_index: z.number().nullish(),
+        delta: z.string(),
+      }),
+      z.object({
+        type: z.literal('response.reasoning_text.done'),
+        item_id: z.string(),
+        output_index: z.number().nullish(),
+        content_index: z.number().nullish(),
+        text: z.string(),
+      }),
+      z.object({
         type: z.literal('response.reasoning_summary_part.done'),
         item_id: z.string(),
         output_index: z.number().nullish(),
@@ -1506,12 +1552,22 @@ export const openaiResponsesResponseSchema = lazySchema(() =>
               type: z.literal('reasoning'),
               id: z.string(),
               encrypted_content: z.string().nullish(),
-              summary: z.array(
-                z.object({
-                  type: z.literal('summary_text'),
-                  text: z.string(),
-                }),
-              ),
+              content: z
+                .array(
+                  z.object({
+                    type: z.literal('reasoning_text'),
+                    text: z.string(),
+                  }),
+                )
+                .nullish(),
+              summary: z
+                .array(
+                  z.object({
+                    type: z.literal('summary_text'),
+                    text: z.string(),
+                  }),
+                )
+                .nullish(),
             }),
             z.object({
               type: z.literal('mcp_call'),
