@@ -561,6 +561,11 @@ function mapComputerCallInput({
   };
 }
 
+export const openaiResponsesSupportedUrls: Record<string, RegExp[]> = {
+  'image/*': [/^https?:\/\/.*$/],
+  'application/pdf': [/^https?:\/\/.*$/],
+};
+
 export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
   readonly specificationVersion = 'v4';
 
@@ -587,13 +592,22 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
     this.config = config;
   }
 
-  readonly supportedUrls: Record<string, RegExp[]> = {
-    'image/*': [/^https?:\/\/.*$/],
-    'application/pdf': [/^https?:\/\/.*$/],
-  };
+  readonly supportedUrls = openaiResponsesSupportedUrls;
 
   get provider(): string {
     return this.config.provider;
+  }
+
+  static async prepareRequest({
+    modelId,
+    config,
+    options,
+  }: {
+    modelId: OpenAIResponsesModelId;
+    config: OpenAIConfig;
+    options: LanguageModelV4CallOptions;
+  }) {
+    return new OpenAIResponsesLanguageModel(modelId, config).getArgs(options);
   }
 
   protected async getArgs({
@@ -3135,7 +3149,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV4 {
                 }),
                 raw: value.response.incomplete_details?.reason ?? undefined,
               };
-              usage = value.response.usage;
+              usage = value.response.usage ?? undefined;
               if (typeof value.response.service_tier === 'string') {
                 serviceTier = value.response.service_tier;
               }
@@ -3536,7 +3550,7 @@ function isResponseOutputChunk(chunk: OpenAIResponsesChunk): boolean {
   );
 }
 
-function mapWebSearchOutput(
+export function mapWebSearchOutput(
   action: OpenAIResponsesWebSearchAction | null | undefined,
 ): InferSchema<typeof webSearchOutputSchema> {
   if (action == null) {
