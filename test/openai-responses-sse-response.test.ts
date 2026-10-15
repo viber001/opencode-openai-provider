@@ -262,6 +262,43 @@ test('streamed output_item frames survive an empty terminal output (no silent em
   }
 });
 
+test('completed response whose output_text omits annotations validates (Tencent DeepSeek)', async () => {
+  const messageWithoutAnnotations = {
+    type: 'message',
+    id: 'msg_tc',
+    role: 'assistant',
+    status: 'completed',
+    phase: 'final_answer',
+    content: [{ type: 'output_text', text: '你好' }],
+  };
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_tc', output: [] },
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: messageWithoutAnnotations,
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([messageWithoutAnnotations]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const result = await scenario.call();
+    assert(result.content.some(part => part.type === 'text' && part.text === '你好'));
+  } finally {
+    await scenario.close();
+  }
+});
+
 test('reasoning_text deltas surface as reasoning stream parts (DeepSeek)', async () => {
   const scenario = await runScenario({
     steps: [
