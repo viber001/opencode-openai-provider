@@ -85,13 +85,27 @@ bun run release     # typecheck 通过后构建并更新安装目录 release/
 - 11 个新增文件：`src/live/`（4 个）、`src/normalize-openai-json-schema.ts`、`src/openai-batch.ts`、`src/openai-decision-model.ts`、`src/openai-decision-model-options.ts`、`src/realtime/openai-realtime-factory.ts`、`src/responses/expand-parallel-tool-call.ts`、`src/responses/map-openai-responses-annotation.ts`；删除 `src/openai-responses-batch.ts`（被 `openai-batch.ts` 取代）。
 - 集成补丁（为衔接 3 个保留 fork 侧的冲突文件）：LM 导出 `openaiResponsesSupportedUrls`、`mapWebSearchOutput`，新增 `static prepareRequest()` 供 `openai-batch.ts` 调用；batch 对 `part.summary` 判空；`convert-to-openai-responses-input.ts` 的 assistant 消息改为 `content: part.text`（上游类型删除了 `id` 与数组 content）；`usage ?? undefined`；`image_generation.action` 透传。
 
+### Tier A 增补（2026-10-15，从 3 个冲突文件中安全挑选）
+
+在保留 fork 缓冲路径的前提下挑选的安全增量（均可与 fork 独有行为叠加）：
+
+- `src/responses/openai-responses-prepare-tools.ts`：
+  - function tool 的 `normalizeOpenAIJsonSchema` 归一化（input/output schema 去除 `propertyNames`、regex lookaround、单元素 `allOf`，产生 compatibility 警告）；
+  - `async` 工具选项（`resolveAsyncToolOption`）：仅 GPT-6+ 支持，其余模型产生 unsupported 警告并丢弃。
+- `src/responses/openai-responses-language-model.ts`：
+  - `supportedReasoningEfforts` 校验：非法 effort 警告并丢弃；
+  - GPT-6+ 移除不支持的 `prompt_cache_retention` + 警告（建议改用 `promptCacheOptions`）；
+  - reasoning 模型清理 `top_logprobs` / `include` 中的 logprobs + 警告；
+  - `web_search_call` 状态 `failed`/`incomplete` → 返回 `{isError:true, result:{status}}`（不再静默空结果）。
+- `src/responses/convert-to-openai-responses-input.ts`：`emittedTextItemIds` 去重守卫（避免重复 `item_reference`）。
+
 ### 未移植的上游行为（3 个冲突文件，保留 fork 侧）
 
 | 文件 | 未采用的上游新行为 |
 | --- | --- |
-| `src/responses/openai-responses-language-model.ts` | `isUndeclaredParallelToolCall` / `suppressInputStreaming` 流装配保护；`expandParallelToolCall` 并行工具调用展开；`mapOpenAIResponsesAnnotationSource` 注解 → sources 映射；`getOpenAIToolName` 工具存在性检查；`reasoningEffortUpdate` 会话中途更新；`getConfigurationUpdateUnsupportedReason` |
-| `src/responses/openai-responses-prepare-tools.ts` | function tool 的 `normalizeOpenAIJsonSchema` 归一化；`strict: tool.strict ?? false` 默认下发；`resolveAsyncToolOption` 的 async 工具选项 |
-| `src/responses/convert-to-openai-responses-input.ts` | assistant 消息 `(!isReasoningModel \|\| hasPrecedingReasoning)` 的 item_reference 条件；`emittedTextItemIds` 去重 |
+| `src/responses/openai-responses-language-model.ts` | `isUndeclaredParallelToolCall` / `suppressInputStreaming` 流装配保护；`expandParallelToolCall` 并行工具调用展开；`mapOpenAIResponsesAnnotationSource` 注解 → sources 映射（citations/source 增强）；`getOpenAIToolName` 工具存在性检查；`reasoningEffortUpdate` 会话中途更新；`getConfigurationUpdateUnsupportedReason` |
+| `src/responses/openai-responses-prepare-tools.ts` | `strict: tool.strict ?? false` 默认下发 |
+| `src/responses/convert-to-openai-responses-input.ts` | assistant 消息 `(!isReasoningModel \|\| hasPrecedingReasoning)` 的 item_reference 条件 |
 
 已知后果：
 
@@ -101,7 +115,8 @@ bun run release     # typecheck 通过后构建并更新安装目录 release/
 
 ### 验证记录（2026-10-15）
 
-`bun run verify` 全绿（typecheck + 34 个测试 + release 重建）；v1 CLI 冒烟通过：`headroom-openai-fork/gpt-5.6-luna`（简单问答 + read 工具调用）、`headroom-tencent-fork/deepseek-v4.1-flash`（简单问答）。
+- 上游移植 + 集成补丁后：`bun run verify` 全绿（typecheck + 34 个测试 + release 重建）；v1 CLI 冒烟通过：`headroom-openai-fork/gpt-5.6-luna`（简单问答 + read 工具调用）、`headroom-tencent-fork/deepseek-v4.1-flash`（简单问答）。
+- Tier A 增补后：`bun run verify` 全绿（typecheck + 38 个测试 + release 重建，新增 web_search failed 状态 / reasoningEffort 校验 / promptCacheRetention 清理 / 工具 schema 归一化与 async 门控 4 个用例）；v1 CLI 冒烟通过：两个 provider 简单问答均正常返回。
 
 ## 约束
 

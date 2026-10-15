@@ -12,6 +12,7 @@ import {
   validateTypes,
   type ToolNameMapping,
 } from '@ai-sdk/provider-utils';
+import { normalizeOpenAIJsonSchema } from '../normalize-openai-json-schema';
 import { codeInterpreterArgsSchema } from '../tool/code-interpreter';
 import { fileSearchArgsSchema } from '../tool/file-search';
 import { imageGenerationArgsSchema } from '../tool/image-generation';
@@ -28,6 +29,11 @@ import type {
 
 export type OpenAIToolOptions = {
   allowedCallers?: Array<'direct' | 'programmatic'>;
+  /**
+   * Whether the model can continue generating after calling this tool without
+   * waiting for its result.
+   */
+  async?: boolean;
   deferLoading?: boolean;
   outputSchema?: JSONObject;
   namespace?: {
@@ -43,6 +49,7 @@ export async function prepareResponsesTools({
   toolNameMapping,
   customProviderToolNames,
   outputSchemaToolNames,
+  supportsAsyncToolCalling = true,
 }: {
   tools: LanguageModelV4CallOptions['tools'];
   toolChoice: LanguageModelV4CallOptions['toolChoice'] | undefined;
@@ -53,6 +60,7 @@ export async function prepareResponsesTools({
   toolNameMapping?: ToolNameMapping;
   customProviderToolNames?: Set<string>;
   outputSchemaToolNames?: Set<string>;
+  supportsAsyncToolCalling?: boolean;
 }): Promise<{
   tools?: Array<OpenAIResponsesTool>;
   toolChoice?:
@@ -106,6 +114,13 @@ export async function prepareResponsesTools({
         const openaiFunctionTool = prepareFunctionTool({
           tool,
           options: openaiOptions,
+          toolWarnings,
+          async: resolveAsyncToolOption({
+            value: openaiOptions?.async,
+            supportsAsyncToolCalling,
+            toolName: tool.name,
+            toolWarnings,
+          }),
           toolNameMapping,
         });
         const namespace = openaiOptions?.namespace;
@@ -322,6 +337,14 @@ export async function prepareResponsesTools({
               type: 'custom',
               name: tool.name,
               description: args.description,
+              ...(resolveAsyncToolOption({
+                value: args.async,
+                supportsAsyncToolCalling,
+                toolName: tool.name,
+                toolWarnings,
+              }) != null
+                ? { async: args.async }
+                : {}),
               format: args.format,
             });
             resolvedCustomProviderToolNames.add(tool.name);
@@ -424,28 +447,65 @@ export async function prepareResponsesTools({
 function prepareFunctionTool({
   tool,
   options,
+  toolWarnings,
+  async,
   toolNameMapping,
 }: {
   tool: LanguageModelV4FunctionTool;
   options: OpenAIToolOptions | undefined;
+  toolWarnings: SharedV4Warning[];
+  async: boolean | undefined;
   toolNameMapping?: ToolNameMapping;
 }): OpenAIResponsesFunctionTool {
   const deferLoading = options?.deferLoading;
+  const normalizedInputSchema = normalizeOpenAIJsonSchema(tool.inputSchema);
+  const normalizedOutputSchema =
+    options?.outputSchema != null
+      ? normalizeOpenAIJsonSchema(options.outputSchema as JSONSchema7)
+      : undefined;
+
+  toolWarnings.push(
+    ...normalizedInputSchema.warnings,
+    ...(normalizedOutputSchema?.warnings ?? []),
+  );
 
   return {
     type: 'function',
     name: toolNameMapping?.toProviderToolName(tool.name) ?? tool.name,
     description: tool.description,
-    parameters: tool.inputSchema,
+    parameters: normalizedInputSchema.schema,
+    ...(async != null ? { async } : {}),
     ...(tool.strict != null ? { strict: tool.strict } : {}),
     ...(deferLoading != null ? { defer_loading: deferLoading } : {}),
     ...(options?.allowedCallers != null
       ? { allowed_callers: options.allowedCallers }
       : {}),
     ...(options?.outputSchema != null
-      ? { output_schema: options.outputSchema as JSONSchema7 }
+      ? { output_schema: normalizedOutputSchema?.schema }
       : {}),
   };
+}
+
+function resolveAsyncToolOption({
+  value,
+  supportsAsyncToolCalling,
+  toolName,
+  toolWarnings,
+}: {
+  value: boolean | undefined;
+  supportsAsyncToolCalling: boolean;
+  toolName: string;
+  toolWarnings: SharedV4Warning[];
+}): boolean | undefined {
+  if (value !== true || supportsAsyncToolCalling) {
+    return value;
+  }
+
+  toolWarnings.push({
+    type: 'unsupported',
+    feature: `async tool calling for "${toolName}"`,
+    details: 'Async tool calling is only supported by GPT-6 and later models.',
+  });
 }
 
 function mapShellEnvironment(environment: {

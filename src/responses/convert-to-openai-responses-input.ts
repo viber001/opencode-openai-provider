@@ -364,6 +364,7 @@ export async function convertToOpenAIResponsesInput({
 
       case 'assistant': {
         const reasoningMessages: Record<string, OpenAIResponsesReasoning> = {};
+        const emittedTextItemIds = new Set<string>();
 
         for (const part of content) {
           switch (part.type) {
@@ -388,7 +389,10 @@ export async function convertToOpenAIResponsesInput({
                 id != null &&
                 !avoidAssistantMessageItemReferences
               ) {
-                input.push({ type: 'item_reference', id });
+                if (!emittedTextItemIds.has(id)) {
+                  emittedTextItemIds.add(id);
+                  input.push({ type: 'item_reference', id });
+                }
                 break;
               }
 

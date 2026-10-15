@@ -61,8 +61,12 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown) {
 
 async function runScenario({
   steps,
+  modelId = 'gpt-5.6-luna',
+  options,
 }: {
   steps: Array<(response: ServerResponse, index: number) => void>;
+  modelId?: string;
+  options?: Record<string, unknown>;
 }) {
   let stepCount = 0;
   const bodies: Array<Record<string, unknown>> = [];
@@ -92,7 +96,7 @@ async function runScenario({
     apiKey: 'test-key',
     baseURL: `http://127.0.0.1:${address.port}/v1`,
   });
-  const model = provider.responses('gpt-5.6-luna');
+  const model = provider.responses(modelId);
 
   const streamRequest = {
     prompt: [{ role: 'user', content: [{ type: 'text' as const, text: 'test' }] }],
@@ -103,6 +107,7 @@ async function runScenario({
     call: () =>
       model.doGenerate({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }],
+        ...(options as object),
       }),
     stream: () => model.doStream(streamRequest),
     async close() {
@@ -620,6 +625,201 @@ test('SSE error frame (service_unavailable_error) is retryable', async () => {
     });
   } finally {
     await scenario.close();
+  }
+});
+
+test('web_search_call with failed status surfaces isError tool result (Tier A)', async () => {
+  const webSearchCall = {
+    type: 'web_search_call',
+    id: 'ws_failed',
+    status: 'failed',
+    action: { type: 'search', query: 'q' },
+  };
+  const scenario = await runScenario({
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_ws', output: [] },
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: successfulMessage(),
+          }),
+          sseFrame('response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 1,
+            item: webSearchCall,
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([successfulMessage(), webSearchCall]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const result = await scenario.call();
+    const toolResult = result.content.find(
+      part => part.type === 'tool-result' && part.toolCallId === 'ws_failed',
+    );
+    assert(toolResult != null && toolResult.type === 'tool-result');
+    assert.equal((toolResult as { isError?: boolean }).isError, true);
+    assert.deepEqual((toolResult as { result?: unknown }).result, {
+      status: 'failed',
+    });
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('unsupported reasoningEffort is warned about and dropped (Tier A)', async () => {
+  const scenario = await runScenario({
+    modelId: 'gpt-6-astra',
+    options: {
+      providerOptions: { openai: { reasoningEffort: 'none' } },
+    },
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_effort', output: [] },
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([successfulMessage()]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const result = await scenario.call();
+    assert(
+      result.warnings.some(
+        warning =>
+          warning.type === 'unsupported' &&
+          warning.feature === 'reasoningEffort' &&
+          /only supports the following reasoning efforts/.test(
+            (warning as { details?: string }).details ?? '',
+          ),
+      ),
+      'expected reasoningEffort warning',
+    );
+    assert.equal(scenario.bodies[0]?.reasoning, undefined);
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('promptCacheRetention is dropped with a warning on GPT-6 (Tier A)', async () => {
+  const scenario = await runScenario({
+    modelId: 'gpt-6-luna',
+    options: {
+      providerOptions: { openai: { promptCacheRetention: '24h' } },
+    },
+    steps: [
+      response =>
+        sendSse(response, [
+          sseFrame('response.created', {
+            type: 'response.created',
+            response: { id: 'resp_cache', output: [] },
+          }),
+          sseFrame('response.completed', {
+            type: 'response.completed',
+            response: responsePayload([successfulMessage()]),
+          }),
+        ]),
+    ],
+  });
+  try {
+    const result = await scenario.call();
+    assert(
+      result.warnings.some(
+        warning =>
+          warning.type === 'unsupported' &&
+          warning.feature === 'promptCacheRetention',
+      ),
+      'expected promptCacheRetention warning',
+    );
+    assert.equal(scenario.bodies[0]?.prompt_cache_retention, undefined);
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('function tool schemas are normalized and async option gated by model (Tier A)', async () => {
+  const tool = {
+    type: 'function' as const,
+    name: 'test_tool',
+    inputSchema: {
+      type: 'object',
+      properties: { value: { type: 'string' } },
+      required: ['value'],
+      propertyNames: { type: 'string' },
+    },
+    providerOptions: { openai: { async: true } },
+  };
+  const steps = [
+    (response: ServerResponse) =>
+      sendSse(response, [
+        sseFrame('response.created', {
+          type: 'response.created',
+          response: { id: 'resp_tool', output: [] },
+        }),
+        sseFrame('response.completed', {
+          type: 'response.completed',
+          response: responsePayload([successfulMessage()]),
+        }),
+      ]),
+  ];
+  const gpt6 = await runScenario({
+    modelId: 'gpt-6-astra',
+    options: { tools: [tool] },
+    steps,
+  });
+  const legacy = await runScenario({
+    modelId: 'gpt-5.6-luna',
+    options: { tools: [tool] },
+    steps,
+  });
+  try {
+    const gpt6Result = await gpt6.call();
+    const gpt6Tool = (gpt6.bodies[0]?.tools as Array<Record<string, unknown>>)[0];
+    assert(gpt6Tool != null);
+    assert.equal(
+      (gpt6Tool.parameters as Record<string, unknown>).propertyNames,
+      undefined,
+    );
+    assert.equal(gpt6Tool.async, true);
+    assert(
+      gpt6Result.warnings.some(
+        warning =>
+          warning.type === 'compatibility' &&
+          warning.feature === 'JSON Schema propertyNames',
+      ),
+      'expected propertyNames compatibility warning',
+    );
+
+    const legacyResult = await legacy.call();
+    const legacyTool = (legacy.bodies[0]?.tools as Array<Record<string, unknown>>)[0];
+    assert(legacyTool != null);
+    assert.equal(legacyTool.async, undefined);
+    assert(
+      legacyResult.warnings.some(
+        warning =>
+          warning.type === 'unsupported' &&
+          /async tool calling for "test_tool"/.test(
+            (warning as { feature?: string }).feature ?? '',
+          ),
+      ),
+      'expected async tool calling warning for non-GPT-6 model',
+    );
+  } finally {
+    await gpt6.close();
+    await legacy.close();
   }
 });
 
